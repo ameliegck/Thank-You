@@ -49,7 +49,8 @@ if (uniqueN(dt_paper_level$title_paper) != uniqueN(ai_extracted$file_name)) {
 # merge further data from papers
 load(file.path(path_data, "gen/wos_data_clean.RData"))
 
-dt_paper_level <- merge(dt_paper_level, wos_data[,c("title_paper", "publication_year")], by = "title_paper", all.x = T)
+dt_paper_level <- merge(dt_paper_level, wos_data[,c("title_paper", "publication_year", "times_cited,_wos_core", "times_cited,_all_databases")], by = "title_paper", all.x = T)
+setnames(dt_paper_level, old = c("times_cited,_wos_core", "times_cited,_all_databases"), new = c("times_cited_wos_score", "times_cited_all_databases"))
 
 rm(ai_extracted, wos_data_ai, wos_data)
 
@@ -576,8 +577,6 @@ dt_person_level <- dt_person_level[, -c("country", "length", "max_length", "firs
 dt_person_level <- dt_person_level[probability < 90, gender := NA]
 
 
-
-
 # also match to paper-level data
 dt_id_gender <- unique(dt_person_level[, .(person_id, gender)])
 
@@ -595,13 +594,89 @@ dt_paper_level[is.na(gender), d_female := NA]
 
 table(dt_person_level$d_female)
 
+
+# match abstract and keywords to papers
+load(file.path(path_data, "gen/wos_data_clean.RData"))
+
+to_merge <- unique(wos_data[,c("title_paper", "publication_year", "abstract", "author_keywords", "keywords_plus")])
+
+# only one observation per paper and publication year
+to_merge[, obs_count := .N, by = c("title_paper", "publication_year")]
+nrow(to_merge)
+
+# if more than one choose random one (very few)
+to_merge <- to_merge[obs_count == 1 | (obs_count > 1 & !duplicated(title_paper)), .(title_paper, publication_year, abstract, author_keywords, keywords_plus)]
+nrow(to_merge)
+
+uniqueN(dt_paper_level$paper_id)
+dt_paper_level <- unique(merge(dt_paper_level, unique(to_merge[,c("title_paper", "publication_year", "abstract", "author_keywords", "keywords_plus")]), by = c("title_paper", "publication_year"), all.x = T))
+uniqueN(dt_paper_level$paper_id)
+
+# add fields classification based on keywords and abstracts and titles (done in classify_fields_from_wos_papers.ipynb)
+fields <- fread(paste0(path_data, "gen/papers_fields_classification.csv"))
+
+dt_paper_level <- unique(merge(dt_paper_level, unique(fields[,c("paper_id", "field_label")]), by = c("paper_id"), all.x = T))
+setnames(dt_paper_level, "field_label", "field")
+
+
+rm(to_merge, wos_data, fields)
+
+
+# ----------------------------------------------------
+# DATA SET FOR AUTHOR INFORMATION
+# ----------------------------------------------------
+
+dt_paper_authors <- dt_paper_level
+
+# turn author_full_names into author_1, author_2 etc
+# looks like Bursztyn, Leonardo; Fujiwara, Thomas; Pallais, 
+# change to first name last name and capital letters
+
+# function to clean one author (first name last name and capital letters)
+# if no comma return upper case original
+clean_name <- function(x) {
+  parts <- tstrsplit(x, ",\\s*")
+  
+  # if no comma → return uppercase original
+  if (length(parts) < 2 || is.na(parts[[2]])) {
+    return(toupper(trimws(x)))
+  }
+  
+  paste(toupper(parts[[2]]), toupper(parts[[1]]))
+}
+
+# split authors
+dt_paper_authors[, author_list := strsplit(author_full_names, ";\\s*")]
+
+# get max number of authors
+max_authors <- max(lengths(dt_paper_authors$author_list))
+
+# create columns
+dt_paper_authors[, paste0("author_", 1:max_authors) := {
+  lapply(1:max_authors, function(i) {
+    sapply(author_list, function(x) {
+      if (length(x) >= i) clean_name(x[i]) else NA_character_
+    })
+  })
+}]
+
+# optional: drop helper column
+dt_paper_authors[, author_list := NULL]
+
+
+
+
+
+
+
+
 # ----------------------------------------------------
 # SAVE
 # ----------------------------------------------------
 
   
-save(dt_person_level, file = file.path(path_data, "gen/dt_person_level.RData"))
-save(dt_paper_level, file = file.path(path_data, "gen/dt_paper_level.RData"))
+#save(dt_person_level, file = file.path(path_data, "gen/dt_person_level.RData"))
+#save(dt_paper_level, file = file.path(path_data, "gen/dt_paper_level.RData"))
 
 
 load(file.path(path_data, "gen/dt_person_level.RData"))
