@@ -471,6 +471,10 @@ dt_paper_authors <- copy(dt_paper_authors)
 save(dt_paper_authors, file = file.path(path_data, "gen/dt_paper_authors.RData"))
 
 
+# who of people is acknowledged
+ids_acknowledged <- unique(dt_people[!is.na(person_id), person_id])
+
+
 rm(unique_names, dist_matrix, adj, g, clusters, name_groups, people_id)
 
 
@@ -958,3 +962,9 @@ dt_paper_authors[, team_any_star := max(top5_repec, na.rm = T), by = paper_id]
 save(dt_person_level, file = file.path(path_data, "gen/dt_person_level.RData"))
 save(dt_paper_level, file = file.path(path_data, "gen/dt_paper_level.RData"))
 save(dt_paper_authors, file = file.path(path_data, "gen/dt_paper_authors.RData"))
+
+uniqueN(dt_people$person_id)
+uniqueN(dt_paper_level$person_id) # count mentioned
+uniqueN(dt_paper_authors$person_id) # count authors
+uniqueN(intersect(dt_paper_level$person_id, dt_paper_authors$person_id)) # count appear in both
+

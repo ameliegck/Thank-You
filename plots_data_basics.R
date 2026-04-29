@@ -226,17 +226,17 @@ rm(plot)
 # with mean (absolute)
 # ----------------------------------------------------
 
-plot <- dt_paper_level[, .N, by = .(paper_id)]
-mean <- mean(plot$N)  # mean number of people mentioned per article
+plot <- unique(dt_paper_level[, c("paper_id", "n_mentions")])
+mean <- mean(plot$n_mentions)  # mean number of people mentioned per article
 
-p <- ggplot(plot, aes(x = N)) +
-  geom_histogram(binwidth = 1, fill = "steelblue", color = "black") +
-  geom_vline(xintercept = mean, linetype = "dashed", color = "red", size = 1) + 
+p <- ggplot(plot, aes(x = n_mentions)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "steelblue") +
+  geom_vline(xintercept = mean, linetype = "dashed", color = "red4", size = 1) + 
   labs(
     x = "Number of Acknowledged People per Article",
     y = "Number of Articles"
   ) +
-  scale_x_continuous(limits = c(0, 85)) +   
+  scale_x_continuous(limits = c(-1, 85)) +   
   theme_minimal(base_size = 14)
 p
 
@@ -246,13 +246,13 @@ ggsave(filename = paste0(path_plots, "distribution_people_per_article.png"),
 
 # Make sure plot has top5 column
 # Example: counting number of people per paper
-plot <- dt_paper_level[, .(N = uniqueN(person_id)), by = .(paper_id, top5)]
+plot <- unique(dt_paper_level[, c("paper_id", "n_mentions", "top5")])
 plot[, top5 := factor(top5, levels = c(1, 0), labels = c("Top 5", "Other"))]
 
 # Overlayed histogram
-p <- ggplot(plot, aes(x = N, fill = top5)) +
-  geom_histogram(position = "identity", alpha = 0.5, binwidth = 1, color = "black") +
-  geom_vline(data = plot[, .(mean_N = mean(N)), by = top5],
+p <- ggplot(plot, aes(x = n_mentions, fill = top5)) +
+  geom_histogram(position = "identity", alpha = 0.5, binwidth = 1, color = "steelblue") +
+  geom_vline(data = plot[, .(mean_N = mean(n_mentions)), by = top5],
              aes(xintercept = mean_N, color = top5),
              linetype = "dashed", size = 1) +
   scale_fill_manual(values = c("Top 5" = "darkorange", "Other" = "steelblue")) +
@@ -263,7 +263,7 @@ p <- ggplot(plot, aes(x = N, fill = top5)) +
     fill = "",
     color = ""
   ) +
-  scale_x_continuous(limits = c(0, 85)) +
+  scale_x_continuous(limits = c(-1, 85)) +
   theme_minimal(base_size = 14) +
   theme(legend.position = "bottom")
 
@@ -279,22 +279,22 @@ ggsave(filename = paste0(path_plots, "distribution_people_per_article_with_journ
 # RELATIVE distribution (all publications)
 # ----------------------------------------------------
 
-plot <- dt_paper_level[, .N, by = .(paper_id)]
-mean <- mean(plot$N)
+plot <- unique(dt_paper_level[, c("paper_id", "n_mentions")])
+mean <- mean(plot$n_mentions)
 
-p <- ggplot(plot, aes(x = N)) +
+p <- ggplot(plot, aes(x = n_mentions)) +
   geom_histogram(
     aes(y = after_stat(count / sum(count))),
     binwidth = 1,
     fill = "steelblue",
-    color = "black"
+    color = "steelblue"
   ) +
-  geom_vline(xintercept = mean, linetype = "dashed", color = "red", size = 1) +
+  geom_vline(xintercept = mean, linetype = "dashed", color = "red4", size = 1) +
   labs(
     x = "Number of Acknowledged People per Article",
-    y = "Share of Publications"
+    y = "Share of Publications",
   ) +
-  scale_x_continuous(limits = c(0, 85)) +
+  scale_x_continuous(limits = c(-1, 85)) +
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
   theme_minimal(base_size = 14)
 
@@ -306,30 +306,30 @@ ggsave(
 )
 
 
-plot <- dt_paper_level[, .(N = uniqueN(person_id)), by = .(paper_id, top5)]
+plot <- unique(dt_paper_level[, c("paper_id", "n_mentions", "top5")])
 plot[, top5 := factor(top5, levels = c(1, 0), labels = c("Top 5", "Other"))]
 
-p <- ggplot(plot, aes(x = N, fill = top5)) +
+p <- ggplot(plot, aes(x = n_mentions, fill = top5)) +
   geom_histogram(
     aes(y = after_stat(count / tapply(count, fill, sum)[fill])),
     position = "identity",
     alpha = 0.5,
     binwidth = 1,
-    color = "black"
+    color = "steelblue"
   ) +
   geom_vline(
-    data = plot[, .(mean_N = mean(N)), by = top5],
+    data = plot[, .(mean_N = mean(n_mentions)), by = top5],
     aes(xintercept = mean_N, color = top5),
     linetype = "dashed",
     size = 1
   ) +
   scale_fill_manual(values = c("Top 5" = "darkorange", "Other" = "steelblue")) +
   scale_color_manual(values = c("Top 5" = "darkorange", "Other" = "steelblue")) +
-  scale_x_continuous(limits = c(0, 85)) +
+  scale_x_continuous(limits = c(-1, 85)) +
   scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
   labs(
     x = "Number of Acknowledged People per Article",
-    y = "Share of Publications (within journal type)",
+    y = "Share of Publications \n (within journal type)",
     fill = "",
     color = ""
   ) +
@@ -372,7 +372,7 @@ p <- ggplot(plot, aes(x = person_index, y = n_mentions)) +
     labels = tick_labels
   ) +
   scale_y_continuous(name = "Number of Mentions",
-                     limits = c(0,75)) +
+                     limits = c(-1,75)) +
   theme_minimal(base_size = 14) +
   theme(
     panel.background = element_rect(fill = "white", color = NA),
@@ -576,7 +576,6 @@ dt_paper_level[top5 == 0 ,.N, by = "gender"]
 # Plot: Share of Ackn. Females per Paper
 # ----------------------------------------------------
 
-
 # contributor share per article, by gender
 
 plot <- dt_paper_level[, .N, by = .(title_paper, gender)]
@@ -608,6 +607,224 @@ ggsave(filename = paste0(path_plots, "female_share_per_article.png"),
        plot = p,  width = 8,  height = 6,  dpi = 300)
 
 
+# ----------------------------------------------------
+# Plot: How does it vary who I mention by authors?
+# ----------------------------------------------------
 
+
+# author information
+load(file.path(path_data, "gen/dt_paper_authors.RData"))
+
+dt_paper_authors <- unique(dt_paper_authors[, .(paper_id, team_size, team_sh_female, team_any_female, team_any_star)])
+dt_paper_level <- merge(dt_paper_level, dt_paper_authors, by = "paper_id", all.x = TRUE)
+
+
+
+# ----------------------------------------------------
+# Plot: Share of Ackn. Females per Paper, by Authors Gender
+# ----------------------------------------------------
+
+# contributor share per article, by gender
+# build dataset
+plot <- dt_paper_level[, .N, by = .(paper_id, gender, team_any_female)]
+plot <- dcast(plot, paper_id + team_any_female ~ gender, value.var = "N", fill = 0)
+
+plot[, total := female + male]
+plot[, female_share := female / total * 100]
+plot <- plot[total > 0]
+
+# compute means per group
+means <- plot[, .(mean_female = mean(female_share)), by = team_any_female]
+
+# plot
+p <- ggplot(plot, aes(x = female_share)) +
+  geom_histogram(
+    aes(y = ..count../sum(..count..)*100),
+    binwidth = 1, fill = "steelblue", color = "black"
+  ) +
+  geom_vline(
+    data = means,
+    aes(xintercept = mean_female),
+    linetype = "dashed", color = "red", size = 1
+  ) +
+  facet_wrap(~ team_any_female, 
+             labeller = labeller(team_any_female = c(
+               "0" = "No female in team",
+               "1" = "At least one female in team"
+             ))) +
+  labs(
+    x = "Share of Acknowledged Female Contributors per Article",
+    y = "Frequency (%)"
+  ) +
+  theme_minimal(base_size = 14)
+
+p
+
+ggsave(filename = paste0(path_plots, "female_share_per_article.png"),
+       plot = p,  width = 8,  height = 6,  dpi = 300)
+
+
+
+
+# ----------------------------------------------------
+# Plot: how many people mentioned per article, distribution
+# with mean (absolute), split by female in authors or not
+# ----------------------------------------------------
+
+
+# Make sure plot has top5 column
+# Example: counting number of people per paper
+plot <- unique(dt_paper_level[, c("paper_id", "n_mentions", "team_any_female")])
+plot[, team_any_female := factor(team_any_female, levels = c(1, 0), labels = c("Min. 1 Female Author", "No Female Author"))]
+plot <- plot[!is.na(team_any_female),] # keep only those with known gender
+
+# Overlayed histogram
+p <- ggplot(plot, aes(x = n_mentions, fill = team_any_female)) +
+  geom_histogram(position = "identity", alpha = 0.5, binwidth = 1, color = "black") +
+  geom_vline(data = plot[, .(mean_N = mean(n_mentions)), by = team_any_female],
+             aes(xintercept = mean_N, color = team_any_female),
+             linetype = "dashed", size = 1) +
+  scale_fill_manual(values = c("Min. 1 Female Author" = "darkorange", "No Female Author" = "steelblue")) +
+  scale_color_manual(values = c("Min. 1 Female Author" = "darkorange", "No Female Author" = "steelblue")) +
+  labs(
+    x = "Number of Acknowledged People per Article",
+    y = "Number of Articles",
+    fill = "",
+    color = ""
+  ) +
+  scale_x_continuous(limits = c(-1, 85)) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+p
+
+
+
+
+# ----------------------------------------------------
+# Plot: how many people mentioned per article, distribution
+# with mean (absolute), split by star in authors or not
+# ----------------------------------------------------
+
+
+# Make sure plot has top5 column
+# Example: counting number of people per paper
+plot <- unique(dt_paper_level[, c("paper_id", "n_mentions", "team_any_star")])
+plot[, team_any_star := factor(team_any_star, levels = c(1, 0), labels = c("Star Author", "Other"))]
+
+# Overlayed histogram
+p <- ggplot(plot, aes(x = n_mentions, fill = team_any_star)) +
+  geom_histogram(position = "identity", alpha = 0.5, binwidth = 1, color = "black") +
+  geom_vline(data = plot[, .(mean_N = mean(n_mentions)), by = team_any_star],
+             aes(xintercept = mean_N, color = team_any_star),
+             linetype = "dashed", size = 1) +
+  scale_fill_manual(values = c("Star Author" = "darkorange", "Other" = "steelblue")) +
+  scale_color_manual(values = c("Star Author" = "darkorange", "Other" = "steelblue")) +
+  labs(
+    x = "Number of Acknowledged People per Article",
+    y = "Number of Articles",
+    fill = "",
+    color = ""
+  ) +
+  scale_x_continuous(limits = c(-1, 85)) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+p
+
+
+# relative makes more sense because there are fewer female authored papers...
+# then there is pretty much no gender differences
+
+
+plot <- unique(dt_paper_level[, c("paper_id", "n_mentions", "team_any_female")])
+plot[, team_any_female := factor(team_any_female, levels = c(1, 0), labels = c("Min. 1 Female Author", "No Female Author"))]
+plot <- plot[!is.na(team_any_female),] # keep only those with known gender
+
+p <- ggplot(plot, aes(x = n_mentions, fill = team_any_female)) +
+  geom_histogram(
+    aes(y = after_stat(count / tapply(count, fill, sum)[fill])),
+    position = "identity",
+    alpha = 0.5,
+    binwidth = 1,
+    color = "black"
+  ) +
+  geom_vline(
+    data = plot[, .(mean_N = mean(n_mentions)), by = team_any_female],
+    aes(xintercept = mean_N, color = team_any_female),
+    linetype = "dashed",
+    size = 1
+  ) +
+  scale_fill_manual(values = c("Min. 1 Female Author" = "darkorange", "No Female Author" = "steelblue")) +
+  scale_color_manual(values = c("Min. 1 Female Author" = "darkorange", "No Female Author" = "steelblue")) +
+  scale_x_continuous(limits = c(-1, 85)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = "Number of Acknowledged People per Article",
+    y = "Share of Publications \n (within author type)",
+    fill = "",
+    color = ""
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+p
+
+
+plot[, .(mean_N = mean(n_mentions)), by = team_any_female]
+View(plot)
+
+
+# ----------------------------------------------------
+# Plot: Share of Ackn. Females per Paper by Author Team Gender
+# ----------------------------------------------------
+
+# contributor share per article, by gender
+plot <- dt_paper_level[, .N, by = .(paper_id, gender, team_any_female)]
+
+plot <- dcast(plot, paper_id + team_any_female ~ gender, value.var = "N", fill = 0)
+
+plot[, total := female + male]
+plot[, female_share := female / total * 100]
+plot <- plot[total > 0]
+
+plot[, team_any_female := factor(
+  team_any_female,
+  levels = c(1, 0),
+  labels = c("Min. 1 Female Author", "No Female Author")
+)]
+plot <- plot[!is.na(team_any_female)]
+
+p <- ggplot(plot, aes(x = female_share, fill = team_any_female)) +
+  geom_histogram(
+    aes(y = after_stat(count / tapply(count, fill, sum)[fill])),
+    position = "identity",
+    alpha = 0.5,
+    binwidth = 1,
+    color = "black"
+  ) +
+  geom_vline(
+    data = plot[, .(mean_female = mean(female_share)), by = team_any_female],
+    aes(xintercept = mean_female, color = team_any_female),
+    linetype = "dashed",
+    size = 1
+  ) +
+  scale_fill_manual(values = c("Min. 1 Female Author" = "darkorange", "No Female Author" = "steelblue")) +
+  scale_color_manual(values = c("Min. 1 Female Author" = "darkorange", "No Female Author" = "steelblue")) +
+  scale_x_continuous(limits = c(-1, 101)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = "Share of Acknowledged Female Contributors per Article",
+    y = "Share of Publications",
+    fill = "",
+    color = ""
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+
+p
+
+ggsave(filename = paste0(path_plots, "female_share_per_article_author_gender.png"),
+       plot = p,  width = 8,  height = 6,  dpi = 300)
 
 

@@ -1,7 +1,7 @@
 rm(list = ls()) 
 
 if(!require("pacman")) install.packages("pacman")
-pacman::p_load(data.table, tidyr, readr, readxl, ggplot2, RColorBrewer, stringr, stringi, stringdist, igraph) # add any packages here
+pacman::p_load(data.table, tidyr, fixest, readr, readxl, ggplot2, RColorBrewer, stringr, stringi, stringdist, igraph) # add any packages here
 
 if(Sys.info()["user"] %in% c("Amelie.Grosenick")){
   path_wd <- c("D:/Projektfolder1 (Miethe, Grosenick)/zz_AmelieMisc/")
@@ -12,6 +12,8 @@ if(Sys.info()["user"] %in% c("Amelie.Grosenick")){
 
 setwd(path_wd)
 
+
+# pretty color #d62728
 
 # This creates basic regressions for data
 
@@ -48,6 +50,20 @@ dt_paper_level <- unique(merge(
 ))
 
 
+# add predicted citations 
+df_pred_cits <- fread(paste0(path_data, "predict_citations/predicted_citations.csv"))
+
+setnames(df_pred_cits, "citations_predicted", "pred_cits")
+
+dt_paper_level <- merge(
+  dt_paper_level,
+  df_pred_cits[, .(paper_id, pred_cits)],
+  by = "paper_id",
+  all.x = TRUE
+)  
+
+
+
 ################################
 #### DATA DESCRIPTION
 ###############################
@@ -67,7 +83,7 @@ uniqueN(dt_paper_level$paper_id)
 # variables to keep
 
 keeper <- c("paper_id", "title_paper", "publication_year", "journal_short", "top5", "field", 
-            "times_cited_wos_score", "times_cited_all_databases", "n_mentions", "n_mentions_star", "n_mentions_female",
+            "times_cited_wos_score", "times_cited_all_databases",  "pred_cits", "n_mentions", "n_mentions_star", "n_mentions_female",
             "team_sh_female", "team_any_female", "team_size", "team_any_star")
 dt_paper_wide <- unique(dt_paper_level[, ..keeper])
 
@@ -81,14 +97,38 @@ dt_paper_wide[, team_sh_female := as.numeric(team_sh_female)]
 dt_paper_wide[, team_any_female := as.numeric(team_any_female)]
 dt_paper_wide[, team_size := as.numeric(team_size)]
 dt_paper_wide[, team_any_star := as.numeric(team_any_star)]
+dt_paper_wide[, pred_cits := as.numeric(pred_cits)]
+
+# create same outcome as in Iaria, SD from citations within
+# field and pub year, winsorized at 99th percentile to reduce influence of outliers
+
+# ── 1. Winsorize citations within publication_year × field ─────────────────────────────
+dt_paper_wide[, citations_wins :=
+                 pmin(times_cited_all_databases,
+                      quantile(times_cited_all_databases, probs = 0.99, na.rm = TRUE)),
+               by = .(publication_year, field)
+]
+
+# ── 2. Standardize citations within publication_year × field ──────────────────────────
+dt_paper_wide[, citations_std :=
+                 {
+                   m <- mean(citations_wins, na.rm = TRUE)
+                   s <- sd(citations_wins, na.rm = TRUE)
+                   
+                   if (is.na(s) || s == 0) {
+                     citations_wins - m
+                   } else {
+                     (citations_wins - m) / s
+                   }
+                 },
+               by = .(publication_year, field)
+]
 
 
 ################################
 #### REGRESSIONS
+#### Outcome: Log citations
 ###############################
-
-library(fixest)
-
 
 # numerical outcome
 m1 <- feols(
@@ -97,7 +137,7 @@ m1 <- feols(
   cluster = ~field
 )
 
-# IHS specs
+# Log specs
 m2 <- feols(
   log(times_cited_all_databases) ~ n_mentions | field +  publication_year,
   data = dt_paper_wide,
@@ -144,7 +184,20 @@ m8 <- feols(
   cluster = ~field
 )
 
+m9 <- feols(
+  log(times_cited_all_databases) ~ n_mentions + n_mentions_star + team_size  + pred_cits + team_any_female + team_any_star | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
 
+
+m10 <- feols(
+  log(times_cited_all_databases) ~ pred_cits | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+summary(m10)
 
 # nicer way to show tables (and combine several models)
 # effects of mentions and journals (table 1)
@@ -164,7 +217,7 @@ etable(
   tex = TRUE,
   title = "Effect of Mentions on Citations",
   label = "tab:citations",
-  file = paste0(path_plots, "results.tex")
+  file = paste0(path_plots, "results_pred.tex")
 )
 
 
@@ -187,7 +240,437 @@ etable(
   tex = TRUE,
   title = "Effect of Mentions on Citations",
   label = "tab:citations",
-  file = paste0(path_plots, "results2.tex")
+  file = paste0(path_plots, "results2_pred.tex")
+)
+
+
+# turn into a plot
+# mentions and mentions stars are the two estimates plotted, with 95% CI
+# first specification is m3, then m5, m6, m7, m8
+# on x-axis add which controls are included (journal, team size, team composition)
+# scale on y-axis for effect size
+
+
+# ----------------------------
+# 1. Store models
+# ----------------------------
+models <- list(
+  m3 = m3,
+  m5 = m5,
+  m6 = m6,
+  m7 = m7,
+  m8 = m8,
+  m9 = m9
+)
+
+# ----------------------------
+# 2. Define labels ONCE here
+# ----------------------------
+control_labels <- c(
+  m3 = "+ Field FE\n+ Pub. Year FE",
+  m5 = "+ Journal FE",
+  m6 = "+ Team Size",
+  m7 = "+ ≥1 Female Author",
+  m8 = "+ ≥1 Star Author",
+  m9 = "+ Pred. Quality"
+)
+
+# ----------------------------
+# 3. Extract coefficients
+# ----------------------------
+extract_coefs <- function(model, model_name) {
+  coefs <- summary(model)$coeftable
+  
+  dt <- data.table(
+    term = rownames(coefs),
+    estimate = coefs[, "Estimate"],
+    se = coefs[, "Std. Error"]
+  )
+  
+  dt <- dt[term %in% c("n_mentions", "n_mentions_star")]
+  
+  dt[, `:=`(
+    conf_low = estimate - 1.96 * se,
+    conf_high = estimate + 1.96 * se,
+    model = model_name
+  )]
+  
+  return(dt)
+}
+
+# ----------------------------
+# 4. Build plotting dataset
+# ----------------------------
+dt_plot <- rbindlist(
+  lapply(names(models), function(m) extract_coefs(models[[m]], m))
+)
+
+# map labels (ONLY place where labels are used)
+dt_plot[, controls := control_labels[model]]
+
+# variable labels
+dt_plot[, term := fifelse(term == "n_mentions", "Mentions", "Star Mentions")]
+
+# order x-axis automatically from label vector
+dt_plot[, controls := factor(controls, levels = control_labels)]
+
+# ----------------------------
+# 5. Plot
+# ----------------------------
+p <- ggplot(dt_plot, aes(x = controls, y = estimate, color = term)) +
+  geom_point(position = position_dodge(width = 0.4), size = 2) +
+  geom_errorbar(
+    aes(ymin = conf_low, ymax = conf_high),
+    width = 0.2,
+    position = position_dodge(width = 0.4)
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c(
+    "Mentions" = "steelblue",
+    "Star Mentions" = "red4"
+  )) +
+  labs(
+    x = "",
+    y = "Log(citations) wins",
+    color = "",
+    title = ""
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 0)  # rotate if needed
+  )
+p
+
+ggsave(filename = paste0(path_plots, "reg_cits_mentions.png"),
+       plot = p,  width = 8,  height = 6,  dpi = 300)
+
+
+
+################################
+#### REGRESSIONS
+#### Outcome: SD citations
+###############################
+
+
+
+# numerical outcome
+m1 <- feols(
+  times_cited_all_databases ~ n_mentions | field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+# IHS specs
+m2 <- feols(
+  citations_std  ~ n_mentions | field +  publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+m3 <- feols(
+  citations_std  ~ n_mentions + n_mentions_star | field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+m4 <- feols(
+  citations_std  ~ n_mentions + n_mentions_star + top5 | field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+m5 <- feols(
+  citations_std  ~ n_mentions + n_mentions_star | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+summary(m5)
+
+
+m6 <- feols(
+  citations_std ~ n_mentions + n_mentions_star + team_size | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+
+m7 <- feols(
+  citations_std  ~ n_mentions + n_mentions_star + team_size + team_any_female | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+
+m8 <- feols(
+  citations_std  ~ n_mentions + n_mentions_star + team_size  + team_any_female + team_any_star | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+m9 <- feols(
+  citations_std  ~ n_mentions + n_mentions_star + team_size  + pred_cits + team_any_female + team_any_star | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+
+
+# nicer way to show tables (and combine several models)
+# effects of mentions and journals (table 1)
+etable(m1, m2, m3, m4, m5)
+
+# export
+etable(
+  m1, m2, m3, m4, m5,
+  headers = c("# Cited", "SD(# Cited)", "SD(# Cited)", "SD(# Cited)", "SD(# Cited)"),
+  dict = c(
+    n_mentions = "Mentions",
+    n_mentions_star = "Mentions $\\times$ Star",
+    top5 = "Top 5 Journal"
+  ),
+  drop = "Intercept",
+  fitstat = c("n", "r2"),
+  tex = TRUE,
+  title = "Effect of Mentions on Citations",
+  label = "tab:citations",
+  file = paste0(path_plots, "results_outcome_sd_cits.tex")
+)
+
+
+# effects of mentions and journals (table 2)
+etable(m5, m6, m7, m8)
+
+# export
+etable(
+  m5, m6, m7, m8,
+  headers = c("SD(# Cited)", "SD(# Cited)", "SD(# Cited)", "SD(# Cited)"),
+  dict = c(
+    n_mentions = "Mentions",
+    n_mentions_star = "Mentions $\\times$ Star",
+    team_size = "# Authors",
+    team_any_female = "Min. 1 Female Author",
+    team_any_star = "Min. 1 Star Author"
+  ),
+  drop = "Intercept",
+  fitstat = c("n", "r2"),
+  tex = TRUE,
+  title = "Effect of Mentions on Citations",
+  label = "tab:citations",
+  file = paste0(path_plots, "results2_outcome_sd_cits.tex")
+)
+
+
+# turn into a plot
+# mentions and mentions stars are the two estimates plotted, with 95% CI
+# first specification is m3, then m5, m6, m7, m8
+# on x-axis add which controls are included (journal, team size, team composition)
+# scale on y-axis for effect size
+
+
+# ----------------------------
+# 1. Store models
+# ----------------------------
+models <- list(
+  m3 = m3,
+  m5 = m5,
+  m6 = m6,
+  m7 = m7,
+  m8 = m8,
+  m9 = m9
+)
+
+# ----------------------------
+# 2. Define labels ONCE here
+# ----------------------------
+control_labels <- c(
+  m3 = "+ Field FE\n+ Pub. Year FE",
+  m5 = "+ Journal FE",
+  m6 = "+ Team Size",
+  m7 = "+ ≥1 Female Author",
+  m8 = "+ ≥1 Star Author",
+  m9 = "+ Pred. Quality"
+)
+
+# ----------------------------
+# 3. Extract coefficients
+# ----------------------------
+extract_coefs <- function(model, model_name) {
+  coefs <- summary(model)$coeftable
+  
+  dt <- data.table(
+    term = rownames(coefs),
+    estimate = coefs[, "Estimate"],
+    se = coefs[, "Std. Error"]
+  )
+  
+  dt <- dt[term %in% c("n_mentions", "n_mentions_star")]
+  
+  dt[, `:=`(
+    conf_low = estimate - 1.96 * se,
+    conf_high = estimate + 1.96 * se,
+    model = model_name
+  )]
+  
+  return(dt)
+}
+
+# ----------------------------
+# 4. Build plotting dataset
+# ----------------------------
+dt_plot <- rbindlist(
+  lapply(names(models), function(m) extract_coefs(models[[m]], m))
+)
+
+# map labels (ONLY place where labels are used)
+dt_plot[, controls := control_labels[model]]
+
+# variable labels
+dt_plot[, term := fifelse(term == "n_mentions", "Mentions", "Star Mentions")]
+
+# order x-axis automatically from label vector
+dt_plot[, controls := factor(controls, levels = control_labels)]
+
+# ----------------------------
+# 5. Plot
+# ----------------------------
+p <- ggplot(dt_plot, aes(x = controls, y = estimate, color = term)) +
+  geom_point(position = position_dodge(width = 0.4), size = 2) +
+  geom_errorbar(
+    aes(ymin = conf_low, ymax = conf_high),
+    width = 0.2,
+    position = position_dodge(width = 0.4)
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c(
+    "Mentions" = "steelblue",
+    "Star Mentions" = "red4"
+  )) +
+  labs(
+    x = "",
+    y = "SD(citations)",
+    color = "",
+    title = ""
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 0)  # rotate if needed
+  )
+p
+
+ggsave(filename = paste0(path_plots, "reg_sd_cits_mentions.png"),
+       plot = p,  width = 8,  height = 6,  dpi = 300)
+
+
+
+
+
+################################
+#### REGRESSIONS
+#### Effect of Stars on Quality
+###############################
+
+
+
+# numerical outcome
+m1 <- feols(
+  pred_cits ~ n_mentions | field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+# IHS specs
+m2 <- feols(
+  pred_cits ~ n_mentions | field +  publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+m3 <- feols(
+  pred_cits ~ n_mentions + n_mentions_star | field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+m4 <- feols(
+  pred_cits ~ n_mentions + n_mentions_star + top5 | field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+m5 <- feols(
+  pred_cits ~ n_mentions + n_mentions_star | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+summary(m5)
+
+
+m6 <- feols(
+  pred_cits ~ n_mentions + n_mentions_star + team_size | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+
+m7 <- feols(
+  pred_cits ~ n_mentions + n_mentions_star + team_size + team_any_female | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+
+m8 <- feols(
+  pred_cits ~ n_mentions + n_mentions_star + team_size  + team_any_female + team_any_star | journal_short + field + publication_year,
+  data = dt_paper_wide,
+  cluster = ~field
+)
+
+
+
+# nicer way to show tables (and combine several models)
+# effects of mentions and journals (table 1)
+etable(m1, m2, m3, m4, m5)
+
+# export
+etable(
+  m1, m2, m3, m4, m5,
+  headers = c("# Cited", "Log(# Cited)", "Log(# Cited)", "Log(# Cited)", "Log(# Cited)"),
+  dict = c(
+    n_mentions = "Mentions",
+    n_mentions_star = "Mentions $\\times$ Star",
+    top5 = "Top 5 Journal"
+  ),
+  drop = "Intercept",
+  fitstat = c("n", "r2"),
+  tex = TRUE,
+  title = "Effect of Mentions on Citations",
+  label = "tab:citations",
+  file = paste0(path_plots, "results_quality.tex")
+)
+
+
+# effects of mentions and journals (table 2)
+etable(m5, m6, m7, m8)
+
+# export
+etable(
+  m5, m6, m7, m8,
+  headers = c("Log(# Cited)", "Log(# Cited)", "Log(# Cited)", "Log(# Cited)"),
+  dict = c(
+    n_mentions = "Mentions",
+    n_mentions_star = "Mentions $\\times$ Star",
+    team_size = "# Authors",
+    team_any_female = "Min. 1 Female Author",
+    team_any_star = "Min. 1 Star Author"
+  ),
+  drop = "Intercept",
+  fitstat = c("n", "r2"),
+  tex = TRUE,
+  title = "Effect of Mentions on Citations",
+  label = "tab:citations",
+  file = paste0(path_plots, "results2_quality.tex")
 )
 
 
@@ -271,12 +754,12 @@ p <- ggplot(dt_plot, aes(x = controls, y = estimate, color = term)) +
   ) +
   geom_hline(yintercept = 0, linetype = "dashed") +
   scale_color_manual(values = c(
-    "Mentions" = "#1f77b4",
-    "Star Mentions" = "#d62728"
+    "Mentions" = "steelblue",
+    "Star Mentions" = "red4"
   )) +
   labs(
     x = "",
-    y = "Log(citations)",
+    y = "Predicted Quality",
     color = "",
     title = ""
   ) +
@@ -287,8 +770,10 @@ p <- ggplot(dt_plot, aes(x = controls, y = estimate, color = term)) +
   )
 p
 
-ggsave(filename = paste0(path_plots, "reg_cits_mentions.png"),
+ggsave(filename = paste0(path_plots, "reg_quality_mentions.png"),
        plot = p,  width = 8,  height = 6,  dpi = 300)
+
+
 
 
 
